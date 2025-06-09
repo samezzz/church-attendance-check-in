@@ -12,19 +12,17 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FormFieldWrapper } from "./form-field-wrapper";
 import { toast } from 'sonner';
+import { useRouter } from 'next/navigation';
 
 const emailSchema = z.object({
   email: z.string().email('Invalid email address'),
   password: z.string().min(6, 'Password must be at least 6 characters'),
 });
 
-const phoneSchema = z.object({
-  phone: z.string().min(10, 'Invalid phone number'),
-});
-
 export function SignInForm() {
-  const { signIn, signInWithPhone } = useAuth();
+  const { signIn, signInWithGoogle } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
+  const router = useRouter();
 
   const emailForm = useForm<z.infer<typeof emailSchema>>({
     resolver: zodResolver(emailSchema),
@@ -34,32 +32,26 @@ export function SignInForm() {
     },
   });
 
-  const phoneForm = useForm<z.infer<typeof phoneSchema>>({
-    resolver: zodResolver(phoneSchema),
-    defaultValues: {
-      phone: '',
-    },
-  });
-
   const onEmailSubmit = async (values: z.infer<typeof emailSchema>) => {
     try {
       setIsLoading(true);
       await signIn(values.email, values.password);
       toast.success('Signed in successfully');
-    } catch (error) {
-      toast.error('Failed to sign in');
+      router.push('/');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to sign in');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const onPhoneSubmit = async (values: z.infer<typeof phoneSchema>) => {
+  const onGoogleSignIn = async () => {
     try {
       setIsLoading(true);
-      await signInWithPhone(values.phone);
-      toast.success('Verification code sent to your phone');
+      await signInWithGoogle();
+      toast.success('Signed in successfully');
     } catch (error) {
-      toast.error('Failed to send verification code');
+      toast.error('Failed to sign in with Google');
     } finally {
       setIsLoading(false);
     }
@@ -75,7 +67,7 @@ export function SignInForm() {
         <Tabs defaultValue="email" className="w-full">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="email">Email</TabsTrigger>
-            <TabsTrigger value="phone">Phone</TabsTrigger>
+            <TabsTrigger value="google">Google</TabsTrigger>
           </TabsList>
           <TabsContent value="email">
             <Form {...emailForm}>
@@ -99,20 +91,17 @@ export function SignInForm() {
               </form>
             </Form>
           </TabsContent>
-          <TabsContent value="phone">
-            <Form {...phoneForm}>
-              <form onSubmit={phoneForm.handleSubmit(onPhoneSubmit)} className="space-y-4">
-                <FormFieldWrapper
-                  control={phoneForm.control}
-                  name="phone"
-                  label="Phone Number"
-                  placeholder="Enter your phone number"
-                />
-                <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? 'Sending code...' : 'Send Verification Code'}
-                </Button>
-              </form>
-            </Form>
+          <TabsContent value="google">
+            <div className="space-y-4">
+              <Button 
+                type="button" 
+                className="w-full" 
+                disabled={isLoading}
+                onClick={onGoogleSignIn}
+              >
+                {isLoading ? 'Signing in...' : 'Sign in with Google'}
+              </Button>
+            </div>
           </TabsContent>
         </Tabs>
       </CardContent>
