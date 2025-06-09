@@ -1,12 +1,15 @@
+"use client"
+
 import { createContext, useContext, useEffect, useState } from 'react'
-import { supabase, User } from '@/lib/supabase'
+import { User, supabase } from '../lib/supabase'
 import { useRouter } from 'next/navigation'
 
 type AuthContextType = {
   user: User | null
   loading: boolean
   signIn: (email: string, password: string) => Promise<void>
-  signUp: (email: string, password: string, name: string) => Promise<void>
+  signInWithPhone: (phone: string) => Promise<void>
+  signUp: (email: string, password: string, fullName: string) => Promise<void>
   signOut: () => Promise<void>
 }
 
@@ -21,7 +24,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Check active sessions and sets the user
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
-        fetchUser(session.user.id)
+        setUser(session.user as User)
       }
       setLoading(false)
     })
@@ -29,7 +32,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Listen for changes on auth state
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
-        fetchUser(session.user.id)
+        setUser(session.user as User)
       } else {
         setUser(null)
       }
@@ -39,50 +42,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe()
   }, [])
 
-  const fetchUser = async (userId: string) => {
-    const { data, error } = await supabase
-      .from('User')
-      .select('*')
-      .eq('id', userId)
-      .single()
-
-    if (error) {
-      console.error('Error fetching user:', error)
-      return
-    }
-
-    setUser(data)
-  }
-
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) throw error
     router.push('/dashboard')
   }
 
-  const signUp = async (email: string, password: string, name: string) => {
-    const { data: { user }, error: signUpError } = await supabase.auth.signUp({
+  const signInWithPhone = async (phone: string) => {
+    const { error } = await supabase.auth.signInWithOtp({
+      phone,
+    })
+    if (error) throw error
+  }
+
+  const signUp = async (email: string, password: string, fullName: string) => {
+    const { error } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        data: {
+          full_name: fullName,
+          role: 'member',
+        },
+      },
     })
-    if (signUpError) throw signUpError
-
-    if (user) {
-      const { error: profileError } = await supabase
-        .from('User')
-        .insert([
-          {
-            id: user.id,
-            email: user.email,
-            name,
-            role: 'MEMBER',
-          },
-        ])
-      if (profileError) throw profileError
-    }
+    if (error) throw error
   }
 
   const signOut = async () => {
@@ -92,7 +76,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signInWithPhone, signUp, signOut }}>
       {children}
     </AuthContext.Provider>
   )
