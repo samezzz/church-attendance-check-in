@@ -4,6 +4,8 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { User, supabase } from '../lib/supabase';
 import { useRouter } from 'next/navigation';
 import { createUserRecord, fetchUserRole, fetchUserData } from '@/app/actions/auth';
+import { createClient } from '@supabase/supabase-js';
+import { Session } from '@supabase/supabase-js';
 
 type UserRole = 'ADMIN' | 'MEMBER';
 
@@ -112,17 +114,99 @@ export function AuthProvider({ children }: { children: React.ReactNode; }) {
   };
 
   const signInWithGoogle = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: `${window.location.origin}/`
-      }
-    });
-    if (error) throw error;
-    
-    // Note: For OAuth, we'll handle the role check after the redirect
-    // The user will be redirected back to the app, and the useEffect will handle setting the role
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/`,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          },
+        },
+      });
+
+      if (error) throw error;
+
+      // After successful OAuth sign in, we'll handle the user creation in the useEffect
+      // that listens for auth state changes
+    } catch (error) {
+      console.error('Google sign in error:', error);
+      throw error;
+    }
   };
+
+  // Add this useEffect to handle post-authentication user creation
+  useEffect(() => {
+    const handleAuthStateChange = async (event: string, session: Session | null) => {
+      if (event === 'SIGNED_IN' && session?.user) {
+        try {
+          // Check if user record already exists
+          const { data: existingUser, error: fetchError } = await supabase
+            .from('User')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
+
+          if (fetchError && fetchError.code !== 'PGRST116') {
+            console.error('Error checking existing user:', fetchError);
+            return;
+          }
+
+          // If user doesn't exist, create a new record
+          if (!existingUser) {
+            console.log('Creating user record for Google sign-in:', session.user);
+            
+            const { data: userData, error: createError } = await createUserRecord(
+              session.user.id,
+              session.user.email || '',
+              session.user.user_metadata.full_name || session.user.email?.split('@')[0] || 'User',
+              session.user.phone || ''
+            );
+
+            if (createError) {
+              console.error('Error creating user record:', createError);
+              return;
+            }
+
+            console.log('User record created successfully:', userData);
+          }
+
+          // Fetch user role and data
+          const { role } = await fetchUserRole(session.user.id);
+          const { data: userData } = await fetchUserData(session.user.id);
+          
+          if (userData) {
+            const extendedUser = {
+              id: session.user.id,
+              email: session.user.email,
+              name: userData.name,
+              phoneNumber: userData.phoneNumber,
+              role: role,
+              createdAt: userData.createdAt,
+              updatedAt: userData.updatedAt
+            };
+            setUser(extendedUser);
+            
+            // Redirect based on role
+            if (role === 'ADMIN') {
+              router.push('/admin/dashboard');
+            } else {
+              router.push('/');
+            }
+          }
+        } catch (error) {
+          console.error('Error in auth state change handler:', error);
+        }
+      }
+    };
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(handleAuthStateChange);
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [router]);
 
   const signUp = async (email: string, password: string, fullName: string, phone: string) => {
     try {
@@ -164,8 +248,7 @@ export function AuthProvider({ children }: { children: React.ReactNode; }) {
 
       if (userError) {
         console.error('User creation error:', userError);
-        // If user creation fails, we should clean up the auth user
-        await supabase.auth.admin.deleteUser(user.id);
+        // Remove the attempt to delete the auth user since we don't have permission
         throw new Error(`Failed to create user record: ${userError instanceof Error ? userError.message : 'Unknown error'}`);
       }
 

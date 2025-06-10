@@ -9,8 +9,23 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey)
 
 export async function createUserRecord(userId: string, email: string, fullName: string, phone: string) {
   try {
-    const { data: userData, error: userError } = await supabaseAdmin
+    console.log('Creating user record with service role key:', !!supabaseServiceKey);
+    
+    // First, let's check if the table exists
+    const { data: tableInfo, error: tableError } = await supabaseAdmin
       .from('User')
+      .select('*')
+      .limit(1);
+
+    if (tableError) {
+      console.error('Table check error:', tableError);
+      throw new Error(`Table check failed: ${tableError.message}`);
+    }
+
+    console.log('Table exists, proceeding with insert...');
+    
+    const { data: userData, error: userError } = await supabaseAdmin
+      .from('User')  // Using the exact table name from Prisma schema
       .insert([
         {
           id: userId,
@@ -26,13 +41,26 @@ export async function createUserRecord(userId: string, email: string, fullName: 
       .single();
 
     if (userError) {
-      console.error('User creation error:', userError);
+      console.error('User creation error details:', {
+        code: userError.code,
+        message: userError.message,
+        details: userError.details,
+        hint: userError.hint
+      });
       throw userError;
     }
 
+    console.log('User record created successfully:', userData);
     return { data: userData, error: null };
   } catch (error) {
     console.error('Error in createUserRecord:', error);
+    if (error instanceof Error) {
+      console.error('Error details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      });
+    }
     return { data: null, error };
   }
 }
