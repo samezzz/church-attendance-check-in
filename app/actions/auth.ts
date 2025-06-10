@@ -9,6 +9,13 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey)
 
 export async function createUserRecord(userId: string, email: string, fullName: string, phone: string) {
   try {
+    console.log('Starting createUserRecord with data:', {
+      userId,
+      email,
+      fullName,
+      phone
+    });
+    
     console.log('Creating user record with service role key:', !!supabaseServiceKey);
     
     // First, let's check if the table exists
@@ -25,7 +32,7 @@ export async function createUserRecord(userId: string, email: string, fullName: 
     console.log('Table exists, proceeding with insert...');
     
     const { data: userData, error: userError } = await supabaseAdmin
-      .from('User')  // Using the exact table name from Prisma schema
+      .from('User')
       .insert([
         {
           id: userId,
@@ -101,6 +108,54 @@ export async function fetchUserData(userId: string) {
     return { data, error: null };
   } catch (error) {
     console.error('Error in fetchUserData:', error);
+    return { data: null, error };
+  }
+}
+
+export async function handleGoogleSignIn(userId: string, email: string, userMetadata: any) {
+  try {
+    console.log('Handling Google sign in for user:', userId);
+    
+    // Check if user record exists
+    const { data: existingUser, error: fetchError } = await supabaseAdmin
+      .from('User')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') {
+      console.error('Error checking existing user:', fetchError);
+      throw fetchError;
+    }
+
+    // If user doesn't exist, create a new record
+    if (!existingUser) {
+      console.log('Creating user record for Google sign-in:', {
+        id: userId,
+        email: email,
+        name: userMetadata.full_name || userMetadata.name || email?.split('@')[0] || 'User',
+        phone: userMetadata.phone || ''
+      });
+      
+      const { data: userData, error: createError } = await createUserRecord(
+        userId,
+        email,
+        userMetadata.full_name || userMetadata.name || email?.split('@')[0] || 'User',
+        userMetadata.phone || ''
+      );
+
+      if (createError) {
+        console.error('Error creating user record:', createError);
+        throw createError;
+      }
+
+      console.log('User record created successfully:', userData);
+      return { data: userData, error: null };
+    }
+
+    return { data: existingUser, error: null };
+  } catch (error) {
+    console.error('Error in handleGoogleSignIn:', error);
     return { data: null, error };
   }
 } 

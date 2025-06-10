@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { User, supabase } from '../lib/supabase';
 import { useRouter } from 'next/navigation';
-import { createUserRecord, fetchUserRole, fetchUserData } from '@/app/actions/auth';
+import { createUserRecord, fetchUserRole, fetchUserData, handleGoogleSignIn } from '@/app/actions/auth';
 import { createClient } from '@supabase/supabase-js';
 import { Session } from '@supabase/supabase-js';
 
@@ -123,6 +123,7 @@ export function AuthProvider({ children }: { children: React.ReactNode; }) {
             access_type: 'offline',
             prompt: 'consent',
           },
+          scopes: 'email profile',
         },
       });
 
@@ -139,57 +140,38 @@ export function AuthProvider({ children }: { children: React.ReactNode; }) {
   // Add this useEffect to handle post-authentication user creation
   useEffect(() => {
     const handleAuthStateChange = async (event: string, session: Session | null) => {
+      console.log('Auth state changed:', event, session?.user?.id);
+      
       if (event === 'SIGNED_IN' && session?.user) {
         try {
-          // Check if user record already exists
-          const { data: existingUser, error: fetchError } = await supabase
-            .from('User')
-            .select('*')
-            .eq('id', session.user.id)
-            .single();
+          console.log('Processing sign in for user:', session.user.id);
+          
+          // Handle Google sign in using server action
+          const { data: userData, error: handleError } = await handleGoogleSignIn(
+            session.user.id,
+            session.user.email || '',
+            session.user.user_metadata
+          );
 
-          if (fetchError && fetchError.code !== 'PGRST116') {
-            console.error('Error checking existing user:', fetchError);
+          if (handleError) {
+            console.error('Error handling Google sign in:', handleError);
             return;
           }
 
-          // If user doesn't exist, create a new record
-          if (!existingUser) {
-            console.log('Creating user record for Google sign-in:', session.user);
-            
-            const { data: userData, error: createError } = await createUserRecord(
-              session.user.id,
-              session.user.email || '',
-              session.user.user_metadata.full_name || session.user.email?.split('@')[0] || 'User',
-              session.user.phone || ''
-            );
-
-            if (createError) {
-              console.error('Error creating user record:', createError);
-              return;
-            }
-
-            console.log('User record created successfully:', userData);
-          }
-
-          // Fetch user role and data
-          const { role } = await fetchUserRole(session.user.id);
-          const { data: userData } = await fetchUserData(session.user.id);
-          
           if (userData) {
             const extendedUser = {
               id: session.user.id,
               email: session.user.email,
               name: userData.name,
               phoneNumber: userData.phoneNumber,
-              role: role,
+              role: userData.role,
               createdAt: userData.createdAt,
               updatedAt: userData.updatedAt
             };
             setUser(extendedUser);
             
             // Redirect based on role
-            if (role === 'ADMIN') {
+            if (userData.role === 'ADMIN') {
               router.push('/admin/dashboard');
             } else {
               router.push('/');
