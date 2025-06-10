@@ -8,8 +8,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 export type User = {
   id: string
   email?: string
-  phone?: string
-  full_name?: string
-  role: 'member' | 'admin'
-  created_at: string
+  phoneNumber?: string
+  name: string
+  role: 'ADMIN' | 'MEMBER'
+  createdAt: string
+  updatedAt: string
 } 
