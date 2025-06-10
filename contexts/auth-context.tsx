@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { User, supabase } from '../lib/supabase';
 import { useRouter } from 'next/navigation';
+import { createUserRecord, fetchUserRole, fetchUserData } from '@/app/actions/auth';
 
 type UserRole = 'ADMIN' | 'MEMBER';
 
@@ -32,38 +33,12 @@ export function AuthProvider({ children }: { children: React.ReactNode; }) {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  const fetchUserRole = async (userId: string) => {
-    try {
-      console.log('Fetching user role for:', userId);
-      const { data, error } = await supabase
-        .from('User')
-        .select('role')
-        .eq('id', userId)
-        .single();
-      
-      if (error) {
-        console.error('Error fetching user role:', error);
-        return 'MEMBER' as UserRole; // Default to MEMBER if role not found
-      }
-      
-      console.log('User role data:', data);
-      return (data?.role || 'MEMBER') as UserRole;
-    } catch (error) {
-      console.error('Error in fetchUserRole:', error);
-      return 'MEMBER' as UserRole;
-    }
-  };
-
   useEffect(() => {
     // Check active sessions and sets the user
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
-        const role = await fetchUserRole(session.user.id);
-        const { data: userData } = await supabase
-          .from('User')
-          .select('*')
-          .eq('id', session.user.id)
-          .single();
+        const { role } = await fetchUserRole(session.user.id);
+        const { data: userData } = await fetchUserData(session.user.id);
         
         if (userData) {
           setUser({
@@ -83,12 +58,8 @@ export function AuthProvider({ children }: { children: React.ReactNode; }) {
     // Listen for changes on auth state
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
-        const role = await fetchUserRole(session.user.id);
-        const { data: userData } = await supabase
-          .from('User')
-          .select('*')
-          .eq('id', session.user.id)
-          .single();
+        const { role } = await fetchUserRole(session.user.id);
+        const { data: userData } = await fetchUserData(session.user.id);
         
         if (userData) {
           setUser({
@@ -115,12 +86,8 @@ export function AuthProvider({ children }: { children: React.ReactNode; }) {
     if (error) throw error;
     
     if (user) {
-      const role = await fetchUserRole(user.id);
-      const { data: userData } = await supabase
-        .from('User')
-        .select('*')
-        .eq('id', user.id)
-        .single();
+      const { role } = await fetchUserRole(user.id);
+      const { data: userData } = await fetchUserData(user.id);
       
       if (userData) {
         const extendedUser = {
@@ -185,48 +152,26 @@ export function AuthProvider({ children }: { children: React.ReactNode; }) {
 
       console.log('Auth user created successfully:', user);
 
-      // Step 2: Create user record
+      // Step 2: Create user record using server action
       console.log('Creating user record in User table with ID:', user.id);
       
-      // First, check if the table exists
-      const { data: tableInfo, error: tableError } = await supabase
-        .from('User')
-        .select('*')
-        .limit(1);
-
-      if (tableError) {
-        console.error('Error checking user table:', tableError);
-        throw new Error('User table might not exist or is not accessible');
-      }
-
-      console.log('User table exists and is accessible');
-
-      // Now try to insert the user
-      const { data: userData, error: userError } = await supabase
-        .from('User')
-        .insert([
-          {
-            id: user.id,
-            email: email,
-            name: fullName,
-            phoneNumber: phone,
-            role: 'MEMBER',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          }
-        ])
-        .select()
-        .single();
+      const { data: userData, error: userError } = await createUserRecord(
+        user.id,
+        email,
+        fullName,
+        phone
+      );
 
       if (userError) {
         console.error('User creation error:', userError);
-        console.error('Error details:', {
-          code: userError.code,
-          message: userError.message,
-          details: userError.details,
-          hint: userError.hint
-        });
-        throw userError;
+        // If user creation fails, we should clean up the auth user
+        await supabase.auth.admin.deleteUser(user.id);
+        throw new Error(`Failed to create user record: ${userError instanceof Error ? userError.message : 'Unknown error'}`);
+      }
+
+      if (!userData) {
+        console.error('No user data returned after creation');
+        throw new Error('Failed to create user record');
       }
 
       console.log('User record created successfully:', userData);
